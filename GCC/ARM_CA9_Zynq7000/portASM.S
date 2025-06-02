@@ -41,11 +41,11 @@
     /* Variables and functions. */
     .extern ulMaxAPIPriorityMask
     .extern _freertos_vector_table
-    .extern pxCurrentTCB
+    .extern pxCurrentTCBs
     .extern vTaskSwitchContext
     .extern vApplicationIRQHandler
     .extern ulPortInterruptNesting
-    .extern ulPortTaskHasFPUContext
+    .extern ulPortTaskHasFPUContexts
 
     .global FreeRTOS_IRQ_Handler
     .global FreeRTOS_SWI_Handler
@@ -63,14 +63,16 @@
     PUSH    {R0-R12, R14}
 
     /* Push the critical nesting count. */
-    LDR     R2, ulCriticalNestingConst
-    LDR     R1, [R2]
+    MRC     p15,0,R4,c0,c0,5 /*core ID*/
+    AND     R4, R4, #1
+    LDR     R2, ulCriticalNestingsConst
+    LDR     R1, [R2, R4, LSL #2]
     PUSH    {R1}
 
     /* Does the task have a floating point context that needs saving?  If
     ulPortTaskHasFPUContext is 0 then no. */
-    LDR     R2, ulPortTaskHasFPUContextConst
-    LDR     R3, [R2]
+    LDR     R2, ulPortTaskHasFPUContextsConst
+    LDR     R3, [R2, R4, LSL #2]
     CMP     R3, #0
 
     /* Save the floating point context, if any. */
@@ -84,7 +86,7 @@
 
     /* Save the stack pointer in the TCB. */
     LDR     R0, pxCurrentTCBConst
-    LDR     R1, [R0]
+    LDR     R1, [R0, R4, LSL #2]
     STR     SP, [R1]
 
     .endm
@@ -94,15 +96,17 @@
 .macro portRESTORE_CONTEXT
 
     /* Set the SP to point to the stack of the task being restored. */
+    MRC     p15,0,R2,c0,c0,5 /*core ID*/
+    AND     R2, R2, #1
     LDR     R0, pxCurrentTCBConst
-    LDR     R1, [R0]
+    LDR     R1, [R0, R2, LSL #2]
     LDR     SP, [R1]
 
     /* Is there a floating point context to restore?  If the restored
     ulPortTaskHasFPUContext is zero then no. */
-    LDR     R0, ulPortTaskHasFPUContextConst
+    LDR     R0, ulPortTaskHasFPUContextsConst
     POP     {R1}
-    STR     R1, [R0]
+    STR     R1, [R0, R2, LSL #2]
     CMP     R1, #0
 
     /* Restore the floating point context, if any. */
@@ -112,9 +116,9 @@
     VMSRNE  FPSCR, R0
 
     /* Restore the critical section nesting depth. */
-    LDR     R0, ulCriticalNestingConst
+    LDR     R0, ulCriticalNestingsConst
     POP     {R1}
-    STR     R1, [R0]
+    STR     R1, [R0, R2, LSL #2]
 
     /* Ensure the priority mask is correct for the critical nesting depth. */
     LDR     R2, ulICCPMRConst
@@ -145,8 +149,11 @@
 FreeRTOS_SWI_Handler:
     /* Save the context of the current task and select a new task to run. */
     portSAVE_CONTEXT
-    LDR R0, vTaskSwitchContextConst
-    BLX R0
+    /*LDR R0, vTaskSwitchContextConst  
+    BLX R0*/
+    MRC p15,0,R0,c0,c0,5 /*core ID*/
+    AND R0, R0, #1
+    BL vTaskSwitchContext        
     portRESTORE_CONTEXT
 
 
@@ -179,10 +186,13 @@ FreeRTOS_IRQ_Handler:
     /* Increment nesting count.  r3 holds the address of ulPortInterruptNesting
     for future use.  r1 holds the original ulPortInterruptNesting value for
     future use. */
+    MRC     p15,0,r2,c0,c0,5 /*core ID*/
+    AND     r2, r2, #1
+    LSLS    r2, #2
     LDR     r3, ulPortInterruptNestingConst
-    LDR     r1, [r3]
+    LDR     r1, [r3, r2]
     ADD     r4, r1, #1
-    STR     r4, [r3]
+    STR     r4, [r3, r2]
 
     /* Read value from the interrupt acknowledge register, which is stored in r0
     for future parameter and interrupt clearing use. */
@@ -214,7 +224,10 @@ FreeRTOS_IRQ_Handler:
     STR     r0, [r4]
 
     /* Restore the old nesting count. */
-    STR     r1, [r3]
+    MRC     p15,0,r2,c0,c0,5 /*core ID*/
+    AND     r2, r2, #1
+    LSLS    r2, #2
+    STR     r1, [r3, r2]
 
     /* A context switch is never performed if the nesting count is not 0. */
     CMP     r1, #0
@@ -223,8 +236,11 @@ FreeRTOS_IRQ_Handler:
     /* Did the interrupt request a context switch?  r1 holds the address of
     ulPortYieldRequired and r0 the value of ulPortYieldRequired for future
     use. */
+	MRC     p15,0,r2,c0,c0,5 /*core ID*/
+    AND     r2, r2, #1
+    LSLS    r2, #2
     LDR     r1, =ulPortYieldRequired
-    LDR     r0, [r1]
+    LDR     r0, [r1, r2]
     CMP     r0, #0
     BNE     switch_before_exit
 
@@ -242,7 +258,7 @@ switch_before_exit:
     /* A context swtich is to be performed.  Clear the context switch pending
     flag. */
     MOV     r0, #0
-    STR     r0, [r1]
+    STR     r0, [r1, r2]
 
     /* Restore used registers, LR-irq and SPSR before saving the context
     to the task stack. */
@@ -257,8 +273,11 @@ switch_before_exit:
     vTaskSwitchContext() if vTaskSwitchContext() uses LDRD or STRD
     instructions, or 8 byte aligned stack allocated data.  LR does not need
     saving as a new LR will be loaded by portRESTORE_CONTEXT anyway. */
-    LDR     R0, vTaskSwitchContextConst
-    BLX     R0
+    /*LDR     R0, vTaskSwitchContextConst
+    BLX     R0*/
+    MRC p15,0,R0,c0,c0,5 /*core ID*/
+    AND R0, R0, #1
+    BL vTaskSwitchContext  
 
     /* Restore the context of, and branch to, the task selected to execute
     next. */
@@ -307,9 +326,9 @@ vApplicationIRQHandler:
 ulICCIARConst:  .word ulICCIAR
 ulICCEOIRConst: .word ulICCEOIR
 ulICCPMRConst: .word ulICCPMR
-pxCurrentTCBConst: .word pxCurrentTCB
-ulCriticalNestingConst: .word ulCriticalNesting
-ulPortTaskHasFPUContextConst: .word ulPortTaskHasFPUContext
+pxCurrentTCBConst: .word pxCurrentTCBs
+ulCriticalNestingsConst: .word ulCriticalNestings
+ulPortTaskHasFPUContextsConst: .word ulPortTaskHasFPUContexts
 ulMaxAPIPriorityMaskConst: .word ulMaxAPIPriorityMask
 vTaskSwitchContextConst: .word vTaskSwitchContext
 vApplicationIRQHandlerConst: .word vApplicationIRQHandler

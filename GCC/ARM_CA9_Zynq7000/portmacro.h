@@ -74,19 +74,125 @@ typedef uint32_t TickType_t;
 /* Task utilities. */
 
 /* Called at the end of an ISR that can cause a context switch. */
-extern volatile uint32_t ulPortYieldRequired;
+extern volatile uint32_t ulPortYieldRequired[2];
 #define portEND_SWITCHING_ISR( xSwitchRequired )\
 {												\
 												\
 	if( xSwitchRequired != pdFALSE )			\
 	{											\
-		ulPortYieldRequired = pdTRUE;			\
+		ulPortYieldRequired[portGET_CORE_ID()] = pdTRUE;			\
 	}											\
 }
 
 #define portYIELD_FROM_ISR( x ) portEND_SWITCHING_ISR( x )
 #define portYIELD() __asm volatile ( "SWI 0" ::: "memory" );
 
+/*-----------------------------------------------------------*/
+
+/* Multi-core */
+#define portMAX_CORE_COUNT    2
+
+static inline unsigned int get_core_num()
+{
+    uint32_t reg_value;
+    //MRC p15,0,<Rd>,c0,c0,5; read Multiprocessor ID register
+    __asm__ volatile ("mrc p15, 0, %0, c0, c0, 5" : "=r"(reg_value));
+    //returns either 0 for core0 or 1 for core1
+    return reg_value & 1U;
+}
+
+/* FreeRTOS core id is always zero based, so always 0 if we're running on only one core */
+#if configNUMBER_OF_CORES == portMAX_CORE_COUNT
+    #define portGET_CORE_ID()    get_core_num()
+#else
+    #define portGET_CORE_ID()    0
+#endif
+
+#define portRTOS_SPINLOCK_COUNT 2
+
+struct spin_lock_t
+{
+    uint8_t ucLock;
+    uint8_t ucOwnedByCore[ portMAX_CORE_COUNT ];
+    uint8_t ucRecursionCountByLock;
+};
+
+static inline int spin_try_lock_unsafe(struct spin_lock_t * pxSpinLock)
+{
+    uint8_t zero = 0;            
+    if (__atomic_compare_exchange_n(&pxSpinLock->ucLock, &zero, 1, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
+    {
+        configASSERT( pxSpinLock->ucRecursionCountByLock == 0 );
+        return 1;
+    }
+    return 0;
+}
+
+static inline void spin_lock_unsafe_blocking(struct spin_lock_t * lock)
+{
+    while (1)
+    {
+        uint8_t zero = 0;            
+        if (__atomic_compare_exchange_n(&lock->ucLock, &zero, 1, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
+        {
+            configASSERT( lock->ucRecursionCountByLock == 0 );
+            break;
+        }
+    }
+}
+
+static inline void spin_unlock_unsafe(struct spin_lock_t * lock)
+{
+    __atomic_store_n(&lock->ucLock, 0, __ATOMIC_SEQ_CST);
+}
+
+static inline void vPortRecursiveLock(unsigned int xCoreId, unsigned int ulLockNum, unsigned int uxAcquire)
+{
+    static struct spin_lock_t xSpinLocks[portRTOS_SPINLOCK_COUNT] = {};
+    configASSERT( ulLockNum < portRTOS_SPINLOCK_COUNT );
+
+    if( uxAcquire )
+    {
+        if (!spin_try_lock_unsafe(&xSpinLocks[ulLockNum])) {
+            if( xSpinLocks[ulLockNum].ucOwnedByCore[xCoreId] )
+            {
+                configASSERT( xSpinLocks[ulLockNum].ucRecursionCountByLock != 255u );
+                xSpinLocks[ulLockNum].ucRecursionCountByLock++;
+                return;
+            }
+            spin_lock_unsafe_blocking(&xSpinLocks[ulLockNum]);
+        }
+        configASSERT( xSpinLocks[ulLockNum].ucRecursionCountByLock == 0 );
+        xSpinLocks[ulLockNum].ucRecursionCountByLock = 1;
+        xSpinLocks[ulLockNum].ucOwnedByCore[xCoreId] = 1;
+    }
+    else
+    {
+        configASSERT( ( xSpinLocks[ulLockNum].ucOwnedByCore[xCoreId] != 0 ));
+        configASSERT( xSpinLocks[ulLockNum].ucRecursionCountByLock != 0 );
+
+        if( !--xSpinLocks[ulLockNum].ucRecursionCountByLock )
+        {
+            xSpinLocks[ulLockNum].ucOwnedByCore[xCoreId] = 0;
+            spin_unlock_unsafe(&xSpinLocks[ulLockNum]);
+        }
+    }
+}
+
+#if ( configNUMBER_OF_CORES == 1 )
+    #define portGET_ISR_LOCK( xCoreID )
+    #define portRELEASE_ISR_LOCK( xCoreID )
+    #define portGET_TASK_LOCK( xCoreID )
+    #define portRELEASE_TASK_LOCK( xCoreID )
+#else
+    #define portGET_ISR_LOCK( xCoreID )         vPortRecursiveLock( ( xCoreID ), 0, pdTRUE )
+    #define portRELEASE_ISR_LOCK( xCoreID )     vPortRecursiveLock( ( xCoreID ), 0, pdFALSE )
+    #define portGET_TASK_LOCK( xCoreID )        vPortRecursiveLock( ( xCoreID ), 1, pdTRUE )
+    #define portRELEASE_TASK_LOCK( xCoreID )    vPortRecursiveLock( ( xCoreID ), 1, pdFALSE )
+#endif
+
+extern void vYieldCore( int xCoreID );
+#define portYIELD_CORE( a )                  vYieldCore( a )
 
 /*-----------------------------------------------------------
  * Critical section control
@@ -97,13 +203,35 @@ extern void vPortExitCritical( void );
 extern uint32_t ulPortSetInterruptMask( void );
 extern void vPortClearInterruptMask( uint32_t ulNewMaskValue );
 extern void vPortInstallFreeRTOSVectorTable( void );
+extern void vPortEnableInterrupts();
+extern void vPortDisableInterrupts();
 
 /* These macros do not globally disable/enable interrupts.  They do mask off
 interrupts that have a priority below configMAX_API_CALL_INTERRUPT_PRIORITY. */
-#define portENTER_CRITICAL()        vPortEnterCritical();
-#define portEXIT_CRITICAL()         vPortExitCritical();
-#define portDISABLE_INTERRUPTS()    ulPortSetInterruptMask()
-#define portENABLE_INTERRUPTS()     vPortClearInterruptMask( 0 )
+#define portENTER_CRITICAL()        vTaskEnterCritical();
+#define portEXIT_CRITICAL()         vTaskExitCritical();
+#define portDISABLE_INTERRUPTS()    vPortDisableInterrupts()
+#define portENABLE_INTERRUPTS()     vPortEnableInterrupts()
+#define portENTER_CRITICAL_FROM_ISR() vTaskEnterCriticalFromISR()
+#define portEXIT_CRITICAL_FROM_ISR( x ) vTaskExitCriticalFromISR( x )
+
+#define portSET_INTERRUPT_MASK()    ulPortSetInterruptMask()
+#define portCLEAR_INTERRUPT_MASK( ulState ) vPortClearInterruptMask( ulState )
+
+#define portHAS_NESTED_INTERRUPTS               1
+#define portSET_INTERRUPT_MASK_FROM_ISR()       ulPortSetInterruptMask()
+#define portCLEAR_INTERRUPT_MASK_FROM_ISR(x)    vPortClearInterruptMask(x)
+
+/*-----------------------------------------------------------*/
+
+/* Critical nesting count management. */
+#define portCRITICAL_NESTING_IN_TCB    0
+
+extern volatile uint32_t ulCriticalNestings[ 2 ];
+#define portGET_CRITICAL_NESTING_COUNT( xCoreID )          ( ulCriticalNestings[ ( xCoreID ) ] )
+#define portSET_CRITICAL_NESTING_COUNT( xCoreID, x )       ( ulCriticalNestings[ ( xCoreID ) ] = ( x ) )
+#define portINCREMENT_CRITICAL_NESTING_COUNT( xCoreID )    ( ulCriticalNestings[ ( xCoreID ) ]++ )
+#define portDECREMENT_CRITICAL_NESTING_COUNT( xCoreID )    ( ulCriticalNestings[ ( xCoreID ) ]-- )
 
 /*-----------------------------------------------------------*/
 
@@ -116,6 +244,8 @@ macros is used. */
 /* Prototype of the FreeRTOS tick handler.  This must be installed as the
 handler for whichever peripheral is used to generate the RTOS tick. */
 void FreeRTOS_Tick_Handler( void );
+
+int Setup_Software_Intr( void );
 
 /*
  * Installs pxHandler as the interrupt handler for the peripheral specified by

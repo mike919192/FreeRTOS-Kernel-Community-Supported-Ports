@@ -80,6 +80,102 @@ extern uintptr_t IntrControllerAddr;
 
 /*-----------------------------------------------------------*/
 
+static void CPUIfInitialize(const XScuGic *InstancePtr)
+{
+	/*
+	 * Program the priority mask of the CPU using the Priority mask register
+	 */
+	XScuGic_CPUWriteReg(InstancePtr, XSCUGIC_CPU_PRIOR_OFFSET, 0xF0U);
+
+
+	/*
+	 * If the CPU operates in both security domains, set parameters in the
+	 * control_s register.
+	 * 1. Set FIQen=1 to use FIQ for secure interrupts,
+	 * 2. Program the AckCtl bit
+	 * 3. Program the SBPR bit to select the binary pointer behavior
+	 * 4. Set EnableS = 1 to enable secure interrupts
+	 * 5. Set EnbleNS = 1 to enable non secure interrupts
+	 */
+
+	/*
+	 * If the CPU operates only in the secure domain, setup the
+	 * control_s register.
+	 * 1. Set FIQen=1,
+	 * 2. Set EnableS=1, to enable the CPU interface to signal secure
+	 *  interrupts. Only enable the IRQ output unless secure interrupts
+	 * are needed.
+	 */
+	XScuGic_CPUWriteReg(InstancePtr, XSCUGIC_CONTROL_OFFSET, 0x07U);
+
+}
+
+void sgi_handler(void *)
+{
+    //u32 id = portGET_CORE_ID();
+    //xil_printf("SGI ISR core %d\n", id);
+    portYIELD_FROM_ISR(pdTRUE);
+}
+
+#define SW_INT_ID 0
+
+XScuGic xInterruptController;
+
+int Setup_Software_Intr()
+{
+    int Status;
+    if (portGET_CORE_ID() == 0)
+    {
+        XScuGic_Config *IntcConfig;
+
+        #ifndef SDT
+            IntcConfig = XScuGic_LookupConfig(XPAR_PS7_SCUGIC_0_DEVICE_ID);
+        #else
+            IntcConfig = XScuGic_LookupConfig(XPAR_XSCUGIC_0_BASEADDR);
+        #endif
+
+        Status = XScuGic_CfgInitialize(&xInterruptController, IntcConfig, IntcConfig->CpuBaseAddress);
+        if (Status != XST_SUCCESS) {
+            return XST_FAILURE;
+        }
+        Xil_ExceptionInit();
+        Xil_ExceptionRegisterHandler(XIL_EXCEPTION_ID_INT, (Xil_ExceptionHandler)XScuGic_InterruptHandler, &xInterruptController);
+    }
+    else
+    {
+        CPUIfInitialize(&xInterruptController);        
+    } 
+    XScuGic_SetPriorityTriggerType(&xInterruptController, SW_INT_ID, portLOWEST_USABLE_INTERRUPT_PRIORITY << portPRIORITY_SHIFT, 3);
+    Status = XScuGic_Connect(&xInterruptController, SW_INT_ID, (Xil_ExceptionHandler)sgi_handler, (void *)&xInterruptController);
+    if (Status != XST_SUCCESS) {
+        print("error setting SGI");
+        return XST_FAILURE;
+    }   
+
+    return XST_SUCCESS;
+}
+
+void vYieldCore( int xCoreID )
+{
+    /* Remove warning if configASSERT is not defined.
+     * xCoreID is not used in this function due to this is a dual-core system. The yielding core must be different from the current core. */
+    ( void ) xCoreID;
+
+    configASSERT( xCoreID != ( int ) portGET_CORE_ID() );
+
+    //xil_printf("Yielding core %d\n", xCoreID);
+    //u32 id = portGET_CORE_ID();
+
+    #if configNUMBER_OF_CORES != 1
+
+        /* Interrupt the other core */
+        u32 cpu_id = xCoreID ? XSCUGIC_SPI_CPU1_MASK : XSCUGIC_SPI_CPU0_MASK;
+        XScuGic_SoftwareIntr(&xInterruptController, SW_INT_ID, cpu_id);
+    #endif
+}
+
+/*-----------------------------------------------------------*/
+
 #if !defined(XPAR_XILTIMER_ENABLED) && !defined(SDT)
 void FreeRTOS_SetupTickInterrupt( void )
 {
@@ -221,7 +317,7 @@ volatile uint32_t ulLocalLine = ulLine; /* To prevent ulLine being optimized awa
 	( void ) pcLocalFileName;
 	( void ) ulLocalLine;
 
-	xil_printf( "Assert failed in file %s, line %lu\r\n", pcLocalFileName, ulLocalLine );
+	xil_printf( "Assert failed in file %s, line %d\r\n", pcLocalFileName, ulLocalLine );
 
 	/* If this function is entered then a call to configASSERT() failed in the
 	FreeRTOS code because of a fatal error.  The pcFileName and ulLine

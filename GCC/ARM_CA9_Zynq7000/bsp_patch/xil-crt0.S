@@ -56,10 +56,19 @@
 
 .Lstack:
 	.long	__stack
+	
+.global core1_stack
+
+.set core1_stack_end, (core1_stack + 16380)
+.set stack1,		(core1_stack_end - 5120)
 
 
 	.globl	_start
 _start:
+    mrc	p15,0,r1,c0,c0,5
+	and	r1, r1, #0xf
+        cmp	r1, #0
+	bne	.Lenclbss
 	bl      __cpu_init		/* Initialize the CPU first (BSP provides this) */
 
 	mov	r0, #0
@@ -88,7 +97,16 @@ _start:
 .Lenclbss:
 
 	/* set stack pointer */
+    mrc	p15,0,r1,c0,c0,5
+	and	r1, r1, #0xf
+        cmp	r1, #0
+	beq	Core0Stack
+    ldr	r13,=stack1		/* stack address */
+    b AfterStack
+Core0Stack:
 	ldr	r13,.Lstack		/* stack address */
+AfterStack:
+
 
     /* Reset and start Global Timer */
 	mov	r0, #0x0
@@ -110,8 +128,13 @@ _start:
 	bl	_profile_init
 #endif /* PROFILING */
 
+    mrc	p15,0,r1,c0,c0,5
+	and	r1, r1, #0xf
+        cmp	r1, #0
+	bne	AfterConstruct
    /* run global constructors */
    bl __libc_init_array
+AfterConstruct:
 
 	/* make sure argc and argv are valid */
 	mov	r0, #0

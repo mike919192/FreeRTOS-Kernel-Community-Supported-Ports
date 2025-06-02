@@ -132,9 +132,8 @@ the CPU itself before modifying certain hardware registers. */
     __asm volatile ( "DSB" );                                       \
     __asm volatile ( "ISB" );
 
-
 /* Macro to unmask all interrupt priorities. */
-#define portCLEAR_INTERRUPT_MASK()                                  \
+#define portCLEAR_INTERRUPT_MASK_P()                                  \
 {                                                                   \
     portCPU_IRQ_DISABLE();                                          \
     portICCPMR_PRIORITY_MASK_REGISTER = portUNMASK_VALUE;           \
@@ -217,18 +216,18 @@ variable has to be stored as part of the task context and must be initialised to
 a non zero value to ensure interrupts don't inadvertently become unmasked before
 the scheduler starts.  As it is stored as part of the task context it will
 automatically be set to 0 when the first task is started. */
-volatile uint32_t ulCriticalNesting = 9999UL;
+volatile uint32_t ulCriticalNestings[2] = {9999UL, 9999UL};
 
 /* Saved as part of the task context.  If ulPortTaskHasFPUContext is non-zero then
 a floating point context must be saved and restored for the task. */
-volatile uint32_t ulPortTaskHasFPUContext = pdFALSE;
+volatile uint32_t ulPortTaskHasFPUContexts[2] = {pdFALSE};
 
 /* Set to 1 to pend a context switch from an ISR. */
-volatile uint32_t ulPortYieldRequired = pdFALSE;
+volatile uint32_t ulPortYieldRequired[2] = {pdFALSE};
 
 /* Counts the interrupt nesting depth.  A context switch is only performed if
 if the nesting depth is 0. */
-volatile uint32_t ulPortInterruptNesting = 0UL;
+volatile uint32_t ulPortInterruptNesting[2] = {0UL};
 /*
  * Global counter used for calculation of run time statistics of tasks.
  * Defined only when the relevant option is turned on
@@ -327,7 +326,7 @@ StackType_t *pxPortInitialiseStack( StackType_t *pxTopOfStack, TaskFunction_t px
 
         pxTopOfStack--;
         *pxTopOfStack = pdTRUE;
-        ulPortTaskHasFPUContext = pdTRUE;
+        ulPortTaskHasFPUContexts[portGET_CORE_ID()] = pdTRUE;
     }
     #else
     {
@@ -546,8 +545,17 @@ uint32_t ulAPSR;
             executing. */
             portCPU_IRQ_DISABLE();
 
+            Setup_Software_Intr();
+
+            static volatile int wait_for = 0;
+
             /* Start the timer that generates the tick ISR. */
-            configSETUP_TICK_INTERRUPT();
+            if (portGET_CORE_ID() == 0)  {                
+                while(wait_for == 0) { }
+                configSETUP_TICK_INTERRUPT();
+            } else {
+                wait_for = 1;
+            }
 
             /* Start the first task executing. */
             vPortRestoreTaskContext();
@@ -568,51 +576,57 @@ void vPortEndScheduler( void )
 {
     /* Not implemented in ports where there is nothing to return to.
     Artificially force an assert. */
-    configASSERT( ulCriticalNesting == 1000UL );
+    configASSERT( ulCriticalNestings[portGET_CORE_ID()] == 1000UL );
 }
 /*-----------------------------------------------------------*/
 
-void vPortEnterCritical( void )
+// void vPortEnterCritical( void )
+// {
+//     /* Mask interrupts up to the max syscall interrupt priority. */
+//     ulPortSetInterruptMask();
+
+//     /* Now interrupts are disabled ulCriticalNesting can be accessed
+//     directly.  Increment ulCriticalNesting to keep a count of how many times
+//     portENTER_CRITICAL() has been called. */
+//     ulCriticalNesting++;
+
+//     /* This is not the interrupt safe version of the enter critical function so
+//     assert() if it is being called from an interrupt context.  Only API
+//     functions that end in "FromISR" can be used in an interrupt.  Only assert if
+//     the critical nesting count is 1 to protect against recursive calls if the
+//     assert function also uses a critical section. */
+//     if( ulCriticalNesting == 1 )
+//     {
+//         configASSERT( ulPortInterruptNesting[portGET_CORE_ID()] == 0 );
+//     }
+// }
+/*-----------------------------------------------------------*/
+
+// void vPortExitCritical( void )
+// {
+//     if( ulCriticalNesting > portNO_CRITICAL_NESTING )
+//     {
+//         /* Decrement the nesting count as the critical section is being
+//         exited. */
+//         ulCriticalNesting--;
+
+//         /* If the nesting level has reached zero then all interrupt
+//         priorities must be re-enabled. */
+//         if( ulCriticalNesting == portNO_CRITICAL_NESTING )
+//         {
+//             /* Critical nesting has reached zero so all interrupt priorities
+//             should be unmasked. */
+//             portCLEAR_INTERRUPT_MASK_P();
+//         }
+//     }
+// }
+/*-----------------------------------------------------------*/
+uint32_t portCHECK_IF_INTERRUPTS_DISABLED()
 {
-    /* Mask interrupts up to the max syscall interrupt priority. */
-    ulPortSetInterruptMask();
-
-    /* Now interrupts are disabled ulCriticalNesting can be accessed
-    directly.  Increment ulCriticalNesting to keep a count of how many times
-    portENTER_CRITICAL() has been called. */
-    ulCriticalNesting++;
-
-    /* This is not the interrupt safe version of the enter critical function so
-    assert() if it is being called from an interrupt context.  Only API
-    functions that end in "FromISR" can be used in an interrupt.  Only assert if
-    the critical nesting count is 1 to protect against recursive calls if the
-    assert function also uses a critical section. */
-    if( ulCriticalNesting == 1 )
-    {
-        configASSERT( ulPortInterruptNesting == 0 );
-    }
+    uint32_t ulInterruptsDisabled;
+    __asm__ volatile ("mrs %0, cpsr" : "=r"(ulInterruptsDisabled));
+    return ulInterruptsDisabled & 1 << 7;
 }
-/*-----------------------------------------------------------*/
-
-void vPortExitCritical( void )
-{
-    if( ulCriticalNesting > portNO_CRITICAL_NESTING )
-    {
-        /* Decrement the nesting count as the critical section is being
-        exited. */
-        ulCriticalNesting--;
-
-        /* If the nesting level has reached zero then all interrupt
-        priorities must be re-enabled. */
-        if( ulCriticalNesting == portNO_CRITICAL_NESTING )
-        {
-            /* Critical nesting has reached zero so all interrupt priorities
-            should be unmasked. */
-            portCLEAR_INTERRUPT_MASK();
-        }
-    }
-}
-/*-----------------------------------------------------------*/
 
 void FreeRTOS_Tick_Handler( void )
 {
@@ -629,27 +643,34 @@ void FreeRTOS_Tick_Handler( void )
 	if (!(ulHighFrequencyTimerTicks % 10))
 #endif
 	{
-    /* Set interrupt mask before altering scheduler structures.   The tick
-    handler runs at the lowest priority, so interrupts cannot already be masked,
-    so there is no need to save and restore the current mask value.  It is
-    necessary to turn off interrupts in the CPU itself while the ICCPMR is being
-    updated. */
-    portCPU_IRQ_DISABLE();
-    portICCPMR_PRIORITY_MASK_REGISTER = ( uint32_t ) ( configMAX_API_CALL_INTERRUPT_PRIORITY << portPRIORITY_SHIFT );
-    __asm volatile (    "dsb        \n"
-                        "isb        \n" ::: "memory" );
-    portCPU_IRQ_ENABLE();
+        configASSERT( portCHECK_IF_INTERRUPTS_DISABLED() != 0 );
+        /* Set interrupt mask before altering scheduler structures.   The tick
+        handler runs at the lowest priority, so interrupts cannot already be masked,
+        so there is no need to save and restore the current mask value.  It is
+        necessary to turn off interrupts in the CPU itself while the ICCPMR is being
+        updated. */
+        
+        // portICCPMR_PRIORITY_MASK_REGISTER = ( uint32_t ) ( configMAX_API_CALL_INTERRUPT_PRIORITY << portPRIORITY_SHIFT );
+        // __asm volatile (    "dsb        \n"
+        //                     "isb        \n" ::: "memory" );
+        ulPortSetInterruptMask();
+        
+        configCLEAR_TICK_INTERRUPT();
+        //portENABLE_INTERRUPTS();
 
-    /* Increment the RTOS tick. */
-    if( xTaskIncrementTick() != pdFALSE )
-    {
-        ulPortYieldRequired = pdTRUE;
-    }
-	}
+        uint32_t ulPreviousMask = taskENTER_CRITICAL_FROM_ISR();
+
+        /* Increment the RTOS tick. */
+        if( xTaskIncrementTick() != pdFALSE )
+        {
+            ulPortYieldRequired[portGET_CORE_ID()] = pdTRUE;
+        }
+        taskEXIT_CRITICAL_FROM_ISR( ulPreviousMask );
+	}    
 
     /* Ensure all interrupt priorities are active again. */
-    portCLEAR_INTERRUPT_MASK();
-    configCLEAR_TICK_INTERRUPT();
+    //portCLEAR_INTERRUPT_MASK_P();
+    portENABLE_INTERRUPTS();
 }
 /*-----------------------------------------------------------*/
 
@@ -670,37 +691,69 @@ void FreeRTOS_Tick_Handler( void )
 #endif /* configUSE_TASK_FPU_SUPPORT */
 /*-----------------------------------------------------------*/
 
-void vPortClearInterruptMask( uint32_t ulNewMaskValue )
+// void vPortClearInterruptMask( uint32_t ulNewMaskValue )
+// {
+//     if( ulNewMaskValue == pdFALSE )
+//     {
+//         portCLEAR_INTERRUPT_MASK_P();
+//     }
+// }
+
+void vPortClearInterruptMask( uint32_t ulSavedInterruptState )
 {
-    if( ulNewMaskValue == pdFALSE )
-    {
-        portCLEAR_INTERRUPT_MASK();
-    }
+    // const uint32_t ulInterruptsEnabled = !portCHECK_IF_INTERRUPTS_DISABLED();
+
+    // /* Interrupts are disabled before the ICCPMR is updated */
+    // if( ulInterruptsEnabled )
+    // {
+    //     portCPU_IRQ_DISABLE();
+    // }
+
+    portICCPMR_PRIORITY_MASK_REGISTER = ulSavedInterruptState;
+    __asm volatile (    "DSB        \n"        
+                        "ISB        \n" ::: "memory" );      
+    
+    // if( ulInterruptsEnabled )
+    // {
+    //     portCPU_IRQ_ENABLE();
+    // }
 }
 /*-----------------------------------------------------------*/
 
 uint32_t ulPortSetInterruptMask( void )
 {
-uint32_t ulReturn;
+    uint32_t ulSavedInterruptState;
+    // const uint32_t ulInterruptsEnabled = !portCHECK_IF_INTERRUPTS_DISABLED();
+    
+    // /* Interrupts are disabled before the ICCPMR is updated */
+    // if( ulInterruptsEnabled )
+    // {
+    //    portCPU_IRQ_DISABLE();
+    // }
 
-    /* Interrupt in the CPU must be turned off while the ICCPMR is being
-    updated. */
+    ulSavedInterruptState = portICCPMR_PRIORITY_MASK_REGISTER;
+    portICCPMR_PRIORITY_MASK_REGISTER = ( uint32_t )
+(configMAX_API_CALL_INTERRUPT_PRIORITY << portPRIORITY_SHIFT );
+    __asm volatile (    "DSB        \n"               
+                        "ISB        \n" ::: "memory" );
+    
+    // if( ulInterruptsEnabled )
+    // {
+    //     portCPU_IRQ_ENABLE();
+    // }
+
+    return ulSavedInterruptState;        
+}
+
+void vPortDisableInterrupts()
+{
     portCPU_IRQ_DISABLE();
-    if( portICCPMR_PRIORITY_MASK_REGISTER == ( uint32_t ) ( configMAX_API_CALL_INTERRUPT_PRIORITY << portPRIORITY_SHIFT ) )
-    {
-        /* Interrupts were already masked. */
-        ulReturn = pdTRUE;
-    }
-    else
-    {
-        ulReturn = pdFALSE;
-        portICCPMR_PRIORITY_MASK_REGISTER = ( uint32_t ) ( configMAX_API_CALL_INTERRUPT_PRIORITY << portPRIORITY_SHIFT );
-        __asm volatile (    "dsb        \n"
-                            "isb        \n" ::: "memory" );
-    }
-    portCPU_IRQ_ENABLE();
+}
 
-    return ulReturn;
+void vPortEnableInterrupts()
+{
+    vPortClearInterruptMask(portUNMASK_VALUE);
+    portCPU_IRQ_ENABLE();
 }
 /*-----------------------------------------------------------*/
 

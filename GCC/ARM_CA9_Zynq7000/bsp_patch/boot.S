@@ -82,6 +82,8 @@
 #endif
 #include "xil_errata.h"
 
+#define SHAREABLE_DDR
+
 .globl MMUTable
 .global _prestart
 .global _boot
@@ -92,6 +94,7 @@
 .global __fiq_stack
 .global __undef_stack
 .global _vector_table
+.global core1_stack
 
 .set PSS_L2CC_BASE_ADDR, 0xF8F02000
 .set PSS_SLCR_BASE_ADDR, 0xF8000000
@@ -140,6 +143,14 @@
 .set SPV_stack,		__supervisor_stack
 .set IRQ_stack,		__irq_stack
 .set SYS_stack,		__stack
+
+.set core1_stack_end, (core1_stack + 16380)
+.set Undef_stack1,	(core1_stack_end)
+.set FIQ_stack1,		(core1_stack_end - 1024)
+.set Abort_stack1,	(core1_stack_end - 2048)
+.set SPV_stack1,		(core1_stack_end - 3072)
+.set IRQ_stack1,		(core1_stack_end - 5120)
+.set SYS_stack1,		(core1_stack_end - 6144)
 
 .set vector_base,	_vector_table
 
@@ -190,11 +201,18 @@ OKToRun:
 	mcr	p15, 0, r0, c12, c0, 0
 
 	/*invalidate scu*/
+    /*skip if core 1*/    
 #if USE_AMP!=1
+    mrc	p15,0,r1,c0,c0,5
+	and	r1, r1, #0xf
+        cmp	r1, #0
+	bne	AfterSCU
 	ldr	r7, =0xf8f0000c
 	ldr	r6, =0xffff
 	str	r6, [r7]
 #endif
+
+AfterSCU:
 
 	/* Invalidate caches and TLBs */
 	mov	r0,#0				/* r0 = 0  */
@@ -221,7 +239,67 @@ shareable_loop:
 	bge	shareable_loop			/* loop till 1G is covered */
 #endif
 
+    mrc	p15,0,r1,c0,c0,5
+	and	r1, r1, #0xf
+        cmp	r1, #0
+	beq	Core0Stack
+
 	mrs	r0, cpsr			/* get the current PSR */
+	mvn	r1, #0x1f			/* set up the irq stack pointer */
+	and	r2, r1, r0
+	orr	r2, r2, #0x12			/* IRQ mode */
+	msr	cpsr, r2
+	ldr	r13,=IRQ_stack1			/* IRQ stack pointer */
+	bic r2, r2, #(0x1 << 9)    		 /* Set EE bit to little-endian */
+	msr spsr_fsxc,r2
+
+	mrs	r0, cpsr			/* get the current PSR */
+	mvn	r1, #0x1f			/* set up the supervisor stack pointer */
+	and	r2, r1, r0
+	orr	r2, r2, #0x13			/* supervisor mode */
+	msr	cpsr, r2
+	ldr	r13,=SPV_stack1			/* Supervisor stack pointer */
+	bic r2, r2, #(0x1 << 9)     		/* Set EE bit to little-endian */
+	msr spsr_fsxc,r2
+
+	mrs	r0, cpsr			/* get the current PSR */
+	mvn	r1, #0x1f			/* set up the Abort  stack pointer */
+	and	r2, r1, r0
+	orr	r2, r2, #0x17			/* Abort mode */
+	msr	cpsr, r2
+	ldr	r13,=Abort_stack1		/* Abort stack pointer */
+	bic r2, r2, #(0x1 << 9)     		/* Set EE bit to little-endian */
+	msr spsr_fsxc,r2
+
+	mrs	r0, cpsr			/* get the current PSR */
+	mvn	r1, #0x1f			/* set up the FIQ stack pointer */
+	and	r2, r1, r0
+	orr	r2, r2, #0x11			/* FIQ mode */
+	msr	cpsr, r2
+	ldr	r13,=FIQ_stack1			/* FIQ stack pointer */
+	bic r2, r2, #(0x1 << 9)    		/* Set EE bit to little-endian */
+	msr spsr_fsxc,r2
+
+	mrs	r0, cpsr			/* get the current PSR */
+	mvn	r1, #0x1f			/* set up the Undefine stack pointer */
+	and	r2, r1, r0
+	orr	r2, r2, #0x1b			/* Undefine mode */
+	msr	cpsr, r2
+	ldr	r13,=Undef_stack1		/* Undefine stack pointer */
+	bic r2, r2, #(0x1 << 9)     		/* Set EE bit to little-endian */
+	msr spsr_fsxc,r2
+
+	mrs	r0, cpsr			/* get the current PSR */
+	mvn	r1, #0x1f			/* set up the system stack pointer */
+	and	r2, r1, r0
+	orr	r2, r2, #0x1F			/* SYS mode */
+	msr	cpsr, r2
+	ldr	r13,=SYS_stack1			/* SYS stack pointer */
+    b   AfterStack
+
+Core0Stack:
+
+    mrs	r0, cpsr			/* get the current PSR */
 	mvn	r1, #0x1f			/* set up the irq stack pointer */
 	and	r2, r1, r0
 	orr	r2, r2, #0x12			/* IRQ mode */
@@ -273,6 +351,8 @@ shareable_loop:
 	msr	cpsr, r2
 	ldr	r13,=SYS_stack			/* SYS stack pointer */
 
+AfterStack:
+
 	/*set scu enable bit in scu*/
 	ldr	r7, =0xf8f00000
 	ldr	r0, [r7]
@@ -299,6 +379,11 @@ shareable_loop:
 	orr	r0, r0, #(0x01 << 6)		/* set SMP bit */
 	orr	r0, r0, #(0x01 )		/* Cache/TLB maintenance broadcast */
 	mcr	p15, 0, r0, c1, c0, 1		/* Write ACTLR*/
+
+    mrc	p15,0,r1,c0,c0,5
+	and	r1, r1, #0xf
+        cmp	r1, #0
+    bne AfterL2Cache
 
 /* Invalidate L2 Cache and enable L2 Cache*/
 /* For AMP, assume running on CPU1. Don't initialize L2 Cache (up to Linux) */
@@ -355,6 +440,8 @@ Sync:	ldr	r1, [r0]
 	orr	r1,r1,r2
 	str	r1, [r0]			/* enable the L2 Caches */
 #endif
+
+AfterL2Cache:
 
 	mov	r0, r0
 	mrc	p15, 0, r1, c1, c0, 2		/* read cp access control register (CACR) into r1 */
