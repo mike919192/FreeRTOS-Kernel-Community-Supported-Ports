@@ -42,6 +42,8 @@
 
 #define XSCUTIMER_CLOCK_HZ ( XPAR_CPU_CORTEXA9_0_CPU_CLK_FREQ_HZ / 2UL )
 
+uint32_t core1_stack[4096];
+
 /*
  * Some FreeRTOSConfig.h settings require the application writer to provide the
  * implementation of a callback function that has a specific name, and a linker

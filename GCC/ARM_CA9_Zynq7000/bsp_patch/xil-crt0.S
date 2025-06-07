@@ -131,10 +131,10 @@ AfterStack:
     mrc	p15,0,r1,c0,c0,5
 	and	r1, r1, #0xf
         cmp	r1, #0
-	bne	AfterConstruct
+	bne	AfterMain
+	
    /* run global constructors */
    bl __libc_init_array
-AfterConstruct:
 
 	/* make sure argc and argv are valid */
 	mov	r0, #0
@@ -142,6 +142,9 @@ AfterConstruct:
 
 	/* Let her rip */
 	bl	main
+	
+AfterMain:
+	bl xPortStartScheduler
 
    /* Cleanup global constructors */
    bl __libc_fini_array

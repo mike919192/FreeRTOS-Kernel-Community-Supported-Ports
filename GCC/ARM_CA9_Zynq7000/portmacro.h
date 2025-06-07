@@ -98,7 +98,7 @@ static inline unsigned int get_core_num()
     //MRC p15,0,<Rd>,c0,c0,5; read Multiprocessor ID register
     __asm__ volatile ("mrc p15, 0, %0, c0, c0, 5" : "=r"(reg_value));
     //returns either 0 for core0 or 1 for core1
-    return reg_value & 1U;
+    return reg_value & 3U;
 }
 
 /* FreeRTOS core id is always zero based, so always 0 if we're running on only one core */

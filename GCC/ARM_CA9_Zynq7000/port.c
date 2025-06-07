@@ -484,10 +484,14 @@ int32_t lReturn;
 	configASSERT( lReturn );
 }
 /*-----------------------------------------------------------*/
+#define sev() __asm__("sev")
+#define ARM1_STARTADR 0xFFFFFFF0
+#define ARM1_BASEADDR 0x100000
 
 BaseType_t xPortStartScheduler( void )
 {
-uint32_t ulAPSR;
+    uint32_t ulAPSR;
+    sleep(1);
 
     #if( configASSERT_DEFINED == 1 )
     {
@@ -550,10 +554,18 @@ uint32_t ulAPSR;
             static volatile int wait_for = 0;
 
             /* Start the timer that generates the tick ISR. */
-            if (portGET_CORE_ID() == 0)  {                
+            if (portGET_CORE_ID() == 0)  {
+                Xil_SetTlbAttributes(0xFFFF0000, 0x14de2);
+                xil_printf("Core #0: writing start address for ARM1\n");
+                Xil_Out32(ARM1_STARTADR, ARM1_BASEADDR);
+                dmb(); // waits until write has finished
+                xil_printf("Core #0: sending the SEV to wake up ARM1\n");
+                sev();
                 while(wait_for == 0) { }
+                xil_printf("Core #0: Starting scheduler\n");
                 configSETUP_TICK_INTERRUPT();
             } else {
+                xil_printf("Core #1: Starting scheduler\n");
                 wait_for = 1;
             }
 
