@@ -146,9 +146,9 @@ static inline void spin_unlock_unsafe(struct spin_lock_t * lock)
     __atomic_store_n(&lock->ucLock, 0, __ATOMIC_SEQ_CST);
 }
 
-static inline void vPortRecursiveLock(unsigned int xCoreId, unsigned int ulLockNum, unsigned int uxAcquire)
+static inline void vPortRecursiveLock(BaseType_t xCoreId, unsigned int ulLockNum, unsigned int uxAcquire)
 {
-    static struct spin_lock_t xSpinLocks[portRTOS_SPINLOCK_COUNT] = {};
+    static struct spin_lock_t xSpinLocks[portRTOS_SPINLOCK_COUNT] = { { 0, { 0 }, 0 } };
     configASSERT( ulLockNum < portRTOS_SPINLOCK_COUNT );
 
     if( uxAcquire )
