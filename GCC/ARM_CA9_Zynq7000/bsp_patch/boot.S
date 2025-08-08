@@ -82,8 +82,6 @@
 #endif
 #include "xil_errata.h"
 
-#define SHAREABLE_DDR
-
 .globl MMUTable
 .global _prestart
 .global _boot
