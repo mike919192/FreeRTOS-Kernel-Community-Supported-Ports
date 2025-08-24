@@ -387,6 +387,10 @@ number of bits implemented by the interrupt controller. */
 
 #define portMEMORY_BARRIER() __asm volatile( "" ::: "memory" )
 
+#ifndef porttraceSGI_HANDLER
+    #define porttraceSGI_HANDLER(yieldCount, handleCount)
+#endif
+
 /* *INDENT-OFF* */
 #ifdef __cplusplus
     }

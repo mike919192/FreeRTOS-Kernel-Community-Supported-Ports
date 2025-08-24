@@ -112,10 +112,17 @@ static void CPUIfInitialize(const XScuGic *InstancePtr)
 
 }
 
-void sgi_handler(void *)
+volatile uint16_t sgi_yield_count[portMAX_CORE_COUNT] = { 0 };
+volatile uint16_t sgi_handle_count[portMAX_CORE_COUNT] = { 0 };
+
+void sgi_handler(void * params)
 {
-    //u32 id = portGET_CORE_ID();
-    //xil_printf("SGI ISR core %d\n", id);
+    ( void ) params;
+
+    unsigned int core_id = portGET_CORE_ID();
+    sgi_handle_count[core_id]++;
+    porttraceSGI_HANDLER(sgi_yield_count[core_id], sgi_handle_count[core_id]);
+
     portYIELD_FROM_ISR(pdTRUE);
 }
 
@@ -148,7 +155,7 @@ int Setup_Software_Intr()
         CPUIfInitialize(&xInterruptController);        
     } 
     XScuGic_SetPriorityTriggerType(&xInterruptController, SW_INT_ID, portLOWEST_USABLE_INTERRUPT_PRIORITY << portPRIORITY_SHIFT, 3);
-    Status = XScuGic_Connect(&xInterruptController, SW_INT_ID, (Xil_ExceptionHandler)sgi_handler, (void *)&xInterruptController);
+    Status = XScuGic_Connect(&xInterruptController, SW_INT_ID, (Xil_ExceptionHandler)sgi_handler, NULL);
     if (Status != XST_SUCCESS) {
         print("error setting SGI");
         return XST_FAILURE;
@@ -165,8 +172,7 @@ void vYieldCore( int xCoreID )
 
     configASSERT( xCoreID != ( int ) portGET_CORE_ID() );
 
-    //xil_printf("Yielding core %d\n", xCoreID);
-    //u32 id = portGET_CORE_ID();
+    sgi_yield_count[xCoreID]++;
 
     #if configNUMBER_OF_CORES != 1
 
