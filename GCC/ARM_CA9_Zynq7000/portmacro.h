@@ -205,6 +205,10 @@ extern void vPortClearInterruptMask( uint32_t ulNewMaskValue );
 extern void vPortInstallFreeRTOSVectorTable( void );
 extern void vPortEnableInterrupts();
 extern void vPortDisableInterrupts();
+extern void vTaskEnterCritical( void );
+extern void vTaskExitCritical( void );
+extern UBaseType_t vTaskEnterCriticalFromISR( void );
+extern void vTaskExitCriticalFromISR( UBaseType_t uxSavedInterruptStatus );
 
 /* These macros do not globally disable/enable interrupts.  They do mask off
 interrupts that have a priority below configMAX_API_CALL_INTERRUPT_PRIORITY. */
