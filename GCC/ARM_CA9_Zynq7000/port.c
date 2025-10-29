@@ -358,7 +358,7 @@ static void prvTaskExitError( void )
 #if !defined(XPAR_XILTIMER_ENABLED) && !defined(SDT)
 BaseType_t xPortInstallInterruptHandler( uint8_t ucInterruptID, XInterruptHandler pxHandler, void *pvCallBackRef )
 #else
-BaseType_t xPortInstallInterruptHandler( uint16_t ucInterruptID, XInterruptHandler pxHandler, void *pvCallBackRef )
+BaseType_t xPortInstallInterruptHandler( uint16_t ucInterruptID, void *pxHandler, void *pvCallBackRef )
 #endif
 {
 int32_t lReturn;
@@ -495,7 +495,7 @@ BaseType_t xPortStartScheduler( void )
 
     #if( configASSERT_DEFINED == 1 )
     {
-		volatile uint32_t ulOriginalPriority;
+		volatile uint8_t ulOriginalPriority;
         volatile uint8_t * const pucFirstUserPriorityRegister = ( volatile uint8_t * const ) ( configINTERRUPT_CONTROLLER_BASE_ADDRESS + portINTERRUPT_PRIORITY_REGISTER_OFFSET );
         volatile uint8_t ucMaxPriorityValue;
 

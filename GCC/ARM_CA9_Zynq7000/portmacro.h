@@ -279,7 +279,7 @@ int Setup_Software_Intr( void );
 #if !defined(XPAR_XILTIMER_ENABLED) && !defined(SDT)
 BaseType_t xPortInstallInterruptHandler( uint8_t ucInterruptID, XInterruptHandler pxHandler, void *pvCallBackRef );
 #else
-BaseType_t xPortInstallInterruptHandler( uint16_t ucInterruptID, XInterruptHandler pxHandler, void *pvCallBackRef );
+BaseType_t xPortInstallInterruptHandler( uint16_t ucInterruptID, void *pxHandler, void *pvCallBackRef );
 #endif
 /*
  * Enables the interrupt, within the interrupt controller, for the peripheral
