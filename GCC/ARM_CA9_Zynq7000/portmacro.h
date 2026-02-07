@@ -120,7 +120,7 @@ struct spin_lock_t
 static inline int spin_try_lock_unsafe(struct spin_lock_t * pxSpinLock)
 {
     uint8_t zero = 0;            
-    if (__atomic_compare_exchange_n(&pxSpinLock->ucLock, &zero, 1, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
+    if (__atomic_compare_exchange_n(&pxSpinLock->ucLock, &zero, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
     {
         configASSERT( pxSpinLock->ucRecursionCountByLock == 0 );
         return 1;
@@ -133,7 +133,7 @@ static inline void spin_lock_unsafe_blocking(struct spin_lock_t * lock)
     while (1)
     {
         uint8_t zero = 0;            
-        if (__atomic_compare_exchange_n(&lock->ucLock, &zero, 1, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
+        if (__atomic_compare_exchange_n(&lock->ucLock, &zero, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
         {
             configASSERT( lock->ucRecursionCountByLock == 0 );
             break;
@@ -143,12 +143,16 @@ static inline void spin_lock_unsafe_blocking(struct spin_lock_t * lock)
 
 static inline void spin_unlock_unsafe(struct spin_lock_t * lock)
 {
-    __atomic_store_n(&lock->ucLock, 0, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&lock->ucLock, 0, __ATOMIC_RELEASE);
 }
 
-static inline void vPortRecursiveLock(BaseType_t xCoreId, unsigned int ulLockNum, unsigned int uxAcquire)
+/* Note this is a single method with uxAcquire parameter since we have
+ * static vars, the method is always called with a compile time constant for
+ * uxAcquire, and the compiler should do the right thing! */
+static inline void vPortRecursiveLock(BaseType_t xCoreId, uint32_t ulLockNum, BaseType_t uxAcquire)
 {
     static struct spin_lock_t xSpinLocks[portRTOS_SPINLOCK_COUNT];
+    
     configASSERT( ulLockNum < portRTOS_SPINLOCK_COUNT );
 
     if( uxAcquire )
@@ -157,7 +161,7 @@ static inline void vPortRecursiveLock(BaseType_t xCoreId, unsigned int ulLockNum
             if( xSpinLocks[ulLockNum].ucOwnedByCore[xCoreId] )
             {
                 configASSERT( xSpinLocks[ulLockNum].ucRecursionCountByLock != 255u );
-                xSpinLocks[ulLockNum].ucRecursionCountByLock++;
+                xSpinLocks[ulLockNum].ucRecursionCountByLock = xSpinLocks[ulLockNum].ucRecursionCountByLock + 1;
                 return;
             }
             spin_lock_unsafe_blocking(&xSpinLocks[ulLockNum]);
@@ -171,7 +175,8 @@ static inline void vPortRecursiveLock(BaseType_t xCoreId, unsigned int ulLockNum
         configASSERT( ( xSpinLocks[ulLockNum].ucOwnedByCore[xCoreId] != 0 ));
         configASSERT( xSpinLocks[ulLockNum].ucRecursionCountByLock != 0 );
 
-        if( !--xSpinLocks[ulLockNum].ucRecursionCountByLock )
+        xSpinLocks[ulLockNum].ucRecursionCountByLock = xSpinLocks[ulLockNum].ucRecursionCountByLock - 1;
+        if( xSpinLocks[ulLockNum].ucRecursionCountByLock == 0U )
         {
             xSpinLocks[ulLockNum].ucOwnedByCore[xCoreId] = 0;
             spin_unlock_unsafe(&xSpinLocks[ulLockNum]);

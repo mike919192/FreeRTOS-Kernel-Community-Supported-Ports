@@ -107,6 +107,10 @@ Core0Stack:
 	ldr	r13,.Lstack		/* stack address */
 AfterStack:
 
+    mrc	p15,0,r1,c0,c0,5
+    and	r1, r1, #0xf
+    cmp	r1, #0
+    bne	AfterTimerInit /* only core 0 does timer init */
 
     /* Reset and start Global Timer */
 	mov	r0, #0x0
@@ -122,6 +126,8 @@ AfterStack:
 	bl XTime_SetTime
 #endif
 #endif
+
+AfterTimerInit:
 
 #ifdef PROFILING			/* defined in Makefile */
 	/* Setup profiling stuff */
