@@ -34,6 +34,7 @@
 #include "task.h"
 
 /* Xilinx includes. */
+#include "xil_mmu.h"
 #include "xscugic.h"
 
 #if defined(XPAR_XILTIMER_ENABLED) || defined(SDT)
@@ -548,14 +549,16 @@ BaseType_t xPortStartScheduler( void )
             executing. */
             portCPU_IRQ_DISABLE();
 
-            Setup_Software_Intr();
+            int status = Setup_Software_Intr();
+            configASSERT(status == XST_SUCCESS);
+            (void)status;
 
             static volatile int wait_for = 0;
 
             /* Start the timer that generates the tick ISR. */
             if (portGET_CORE_ID() == 0)  {
                 configSETUP_TICK_INTERRUPT();
-                Xil_SetTlbAttributes(0xFFFF0000, 0x14de2);
+                Xil_SetTlbAttributes((INTPTR)0xFFFF0000, 0x14de2);
                 Xil_Out32(ARM1_STARTADR, ARM1_BASEADDR);
                 dmb(); // waits until write has finished
                 sev(); // wake up ARM1
