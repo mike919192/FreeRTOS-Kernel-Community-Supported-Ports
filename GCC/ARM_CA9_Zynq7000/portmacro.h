@@ -121,7 +121,7 @@ struct __attribute__((aligned(32))) spin_lock_t
 static inline int spin_try_lock_unsafe(struct spin_lock_t * pxSpinLock)
 {
     uint32_t zero = 0;            
-    if (__atomic_compare_exchange_n(&pxSpinLock->ucLock, &zero, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+    if (__atomic_compare_exchange_n(&pxSpinLock->ucLock, &zero, 1, FALSE, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
     {
         configASSERT( pxSpinLock->ucRecursionCountByLock == 0 );
         return 1;
@@ -134,7 +134,7 @@ static inline void spin_lock_unsafe_blocking(struct spin_lock_t * lock)
     while (1)
     {
         uint32_t zero = 0;            
-        if (__atomic_compare_exchange_n(&lock->ucLock, &zero, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+        if (__atomic_compare_exchange_n(&lock->ucLock, &zero, 1, TRUE, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
         {
             configASSERT( lock->ucRecursionCountByLock == 0 );
             break;
