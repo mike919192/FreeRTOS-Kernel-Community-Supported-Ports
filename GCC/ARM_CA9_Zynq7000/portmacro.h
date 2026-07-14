@@ -401,6 +401,10 @@ number of bits implemented by the interrupt controller. */
     #define porttraceSGI_HANDLER(yieldCount, handleCount)
 #endif
 
+#ifndef portENABLE_FPU_SAFE_IRQ_HANDLER
+    #define portENABLE_FPU_SAFE_IRQ_HANDLER 0
+#endif
+
 /* *INDENT-OFF* */
 #ifdef __cplusplus
     }
