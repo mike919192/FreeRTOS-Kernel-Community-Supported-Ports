@@ -25,6 +25,9 @@
  * https://github.com/FreeRTOS
  *
  */
+ #include "FreeRTOSConfig.h"
+ #include "portDefaults.h"
+ 
     .eabi_attribute Tag_ABI_align_preserved, 1
     .text
     .arm
@@ -46,6 +49,10 @@
     .extern vApplicationIRQHandler
     .extern ulPortInterruptNesting
     .extern ulPortTaskHasFPUContexts
+    
+#if (portENABLE_CHECK_FPU_SAFE_IRQ_IS_NEEDED == 1)  
+    .extern ulFPUSafeIRQIsNeeded
+#endif
 
     .global FreeRTOS_IRQ_Handler
     .global FreeRTOS_SWI_Handler
@@ -295,23 +302,80 @@ switch_before_exit:
  * called vApplicationIRQHandler().
  *****************************************************************************/
 
+/* This macro expects that the cpsr zero bit is true before first call.
+   The result is the status of the cpsr zero bit. If any D register is not equal, 
+   subsequent compares are short circuited, but POP is always performed*/
+ .macro POP_D_AND_CHECK_IF_EQUAL, d_reg
+    VMOVEQ  R0, R1, \d_reg
+    VPOP    {\d_reg}
+    VMOVEQ  R2, R3, \d_reg
+    CMPEQ   R1, R3  /* Compare the high 32 bits */
+    CMPEQ   R0, R2  /* Compare the low 32 bits */
+    .endm
+
 .align 4
 .weak vApplicationIRQHandler
 .type vApplicationIRQHandler, %function
 vApplicationIRQHandler:
     PUSH    {LR}
-    FMRX    R1,  FPSCR
     VPUSH   {D0-D15}
     VPUSH   {D16-D31}
+    VMRS    R1, FPSCR
     PUSH    {R1}
 
     LDR     r1, vApplicationFPUSafeIRQHandlerConst
     BLX     r1
 
+#if (portENABLE_CHECK_FPU_SAFE_IRQ_IS_NEEDED == 1)
     POP     {R0}
+    VMRS    R1, FPSCR
+    CMP     R0, R1 /* Check for changed FPSCR */
+    VMSR    FPSCR, R0
+    
+    POP_D_AND_CHECK_IF_EQUAL D16
+    POP_D_AND_CHECK_IF_EQUAL D17
+    POP_D_AND_CHECK_IF_EQUAL D18
+    POP_D_AND_CHECK_IF_EQUAL D19
+    POP_D_AND_CHECK_IF_EQUAL D20
+    POP_D_AND_CHECK_IF_EQUAL D21
+    POP_D_AND_CHECK_IF_EQUAL D22
+    POP_D_AND_CHECK_IF_EQUAL D23
+    POP_D_AND_CHECK_IF_EQUAL D24
+    POP_D_AND_CHECK_IF_EQUAL D25
+    POP_D_AND_CHECK_IF_EQUAL D26
+    POP_D_AND_CHECK_IF_EQUAL D27
+    POP_D_AND_CHECK_IF_EQUAL D28
+    POP_D_AND_CHECK_IF_EQUAL D29
+    POP_D_AND_CHECK_IF_EQUAL D30
+    POP_D_AND_CHECK_IF_EQUAL D31
+
+    POP_D_AND_CHECK_IF_EQUAL D0
+    POP_D_AND_CHECK_IF_EQUAL D1
+    POP_D_AND_CHECK_IF_EQUAL D2
+    POP_D_AND_CHECK_IF_EQUAL D3
+    POP_D_AND_CHECK_IF_EQUAL D4
+    POP_D_AND_CHECK_IF_EQUAL D5
+    POP_D_AND_CHECK_IF_EQUAL D6
+    POP_D_AND_CHECK_IF_EQUAL D7
+    POP_D_AND_CHECK_IF_EQUAL D8
+    POP_D_AND_CHECK_IF_EQUAL D9
+    POP_D_AND_CHECK_IF_EQUAL D10
+    POP_D_AND_CHECK_IF_EQUAL D11
+    POP_D_AND_CHECK_IF_EQUAL D12
+    POP_D_AND_CHECK_IF_EQUAL D13
+    POP_D_AND_CHECK_IF_EQUAL D14
+    POP_D_AND_CHECK_IF_EQUAL D15
+    
+    /* If not equal then set global variable */
+    MOVNE   R0, #1
+    LDRNE   R1, ulFPUSafeIRQIsNeededConst
+    STRNE   R0, [R1]
+#else
+    POP     {R0}
+    VMSR    FPSCR, R0
     VPOP    {D16-D31}
     VPOP    {D0-D15}
-    VMSR    FPSCR, R0
+#endif
 
     POP {PC}
 
@@ -328,9 +392,8 @@ vApplicationIRQHandlerConst: .word vApplicationIRQHandler
 ulPortInterruptNestingConst: .word ulPortInterruptNesting
 vApplicationFPUSafeIRQHandlerConst: .word vApplicationFPUSafeIRQHandler
 
+#if (portENABLE_CHECK_FPU_SAFE_IRQ_IS_NEEDED == 1)    
+    ulFPUSafeIRQIsNeededConst: .word ulFPUSafeIRQIsNeeded
+#endif
+
 .end
-
-
-
-
-

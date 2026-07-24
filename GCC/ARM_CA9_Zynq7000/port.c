@@ -229,6 +229,11 @@ volatile uint32_t ulPortYieldRequired[2] = {pdFALSE};
 /* Counts the interrupt nesting depth.  A context switch is only performed if
 if the nesting depth is 0. */
 volatile uint32_t ulPortInterruptNesting[2] = {0UL};
+
+#if (portENABLE_CHECK_FPU_SAFE_IRQ_IS_NEEDED == 1)  
+    volatile uint32_t ulFPUSafeIRQIsNeeded = 0UL;
+#endif
+
 /*
  * Global counter used for calculation of run time statistics of tasks.
  * Defined only when the relevant option is turned on

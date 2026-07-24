@@ -29,6 +29,8 @@
 #ifndef PORTMACRO_H
 #define PORTMACRO_H
 
+#include "portDefaults.h"
+
 #ifdef __cplusplus
 	extern "C" {
 #endif
@@ -399,10 +401,6 @@ number of bits implemented by the interrupt controller. */
 
 #ifndef porttraceSGI_HANDLER
     #define porttraceSGI_HANDLER(yieldCount, handleCount)
-#endif
-
-#ifndef portENABLE_FPU_SAFE_IRQ_HANDLER
-    #define portENABLE_FPU_SAFE_IRQ_HANDLER 0
 #endif
 
 /* *INDENT-OFF* */
